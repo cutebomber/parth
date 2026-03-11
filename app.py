@@ -18,7 +18,7 @@ from sqlalchemy import select, func, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 import secrets
 
-from database.db import (
+from db import (
     Database, User, TelegramAccount, Order, Transaction,
     AccountStatus, OrderStatus, AccountCategory, PaymentMethod
 )
@@ -352,7 +352,7 @@ async def oxapay_callback(request: Request):
     # Alternatively, trigger delivery directly here:
     try:
         from aiogram import Bot
-        from handlers.payment import deliver_account
+        from payment import deliver_account
 
         bot = Bot(token=config.BOT_TOKEN, parse_mode="HTML")
 
