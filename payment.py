@@ -1,43 +1,33 @@
-import asyncio
 import time
 import logging
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from database.db import Database, OrderStatus, PaymentMethod
-from payments.oxapay import OxaPayClient
-from payments.ton import TonPaymentClient
-from utils.keyboards import payment_check_kb, back_to_main_kb
+from db import Database, OrderStatus, PaymentMethod
+from oxapay import OxaPayClient
+from ton import TonPaymentClient
 
 router = Router()
 logger = logging.getLogger(__name__)
 
-# In-memory store for pending TON payments {order_id: {memo, ton_amount, timestamp}}
 pending_ton: dict[int, dict] = {}
 
-
-# ──────────────────────────────────────────────
-# TON PAYMENT
-# ──────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("pay_ton:"))
 async def cb_pay_ton(call: CallbackQuery, db: Database, ton_client: TonPaymentClient):
     account_id = int(call.data.split(":")[1])
     acc = await db.get_account(account_id)
-
-    if not acc or acc.status.value != "available":
+    if not acc or acc.status != "available":
         await call.answer("❌ Account no longer available!", show_alert=True)
         return
 
     user = await db.get_user(call.from_user.id)
     ton_amount = await ton_client.usd_to_ton(acc.price)
-
     if not ton_amount:
         await call.answer("❌ Could not fetch TON price, try again.", show_alert=True)
         return
 
-    # Create order
     order = await db.create_order(
         user_id=user.id,
         account_id=acc.id,
@@ -54,7 +44,6 @@ async def cb_pay_ton(call: CallbackQuery, db: Database, ton_client: TonPaymentCl
     }
 
     deeplink = ton_client.get_tonkeeper_link(ton_amount, memo)
-
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="💎 Open TonKeeper", url=deeplink))
     builder.row(InlineKeyboardButton(text="✅ I've Paid", callback_data=f"check_pay:{order.id}:ton"))
@@ -68,32 +57,25 @@ async def cb_pay_ton(call: CallbackQuery, db: Database, ton_client: TonPaymentCl
         f"💎 Amount: <b>{ton_amount} TON</b>\n"
         f"📝 Memo/Comment: <code>{memo}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📋 <b>Steps:</b>\n"
-        f"1. Click 'Open TonKeeper' or send manually\n"
+        f"1. Click 'Open TonKeeper'\n"
         f"2. Send exactly <b>{ton_amount} TON</b>\n"
-        f"3. <b>Include memo</b> in the comment field!\n"
-        f"4. Press 'I've Paid' to verify\n\n"
+        f"3. <b>Include memo</b> in comment!\n"
+        f"4. Press 'I've Paid'\n\n"
         f"⚠️ Memo is required for auto-verification!",
         reply_markup=builder.as_markup()
     )
     await call.answer()
 
 
-# ──────────────────────────────────────────────
-# OXAPAY PAYMENT
-# ──────────────────────────────────────────────
-
 @router.callback_query(F.data.startswith("pay_oxapay:"))
 async def cb_pay_oxapay(call: CallbackQuery, db: Database, oxapay: OxaPayClient, config):
     account_id = int(call.data.split(":")[1])
     acc = await db.get_account(account_id)
-
-    if not acc or acc.status.value != "available":
+    if not acc or acc.status != "available":
         await call.answer("❌ Account no longer available!", show_alert=True)
         return
 
     user = await db.get_user(call.from_user.id)
-
     order = await db.create_order(
         user_id=user.id,
         account_id=acc.id,
@@ -112,9 +94,6 @@ async def cb_pay_oxapay(call: CallbackQuery, db: Database, oxapay: OxaPayClient,
 
     if not invoice:
         await call.answer("❌ Payment gateway error. Try again.", show_alert=True)
-        # Revert reservation
-        from database.db import AccountStatus
-        await db.reserve_account(account_id)  # Will be reverted on cancel
         return
 
     await db.update_order_status(order.id, OrderStatus.PENDING, payment_id=invoice.invoice_id)
@@ -132,16 +111,11 @@ async def cb_pay_oxapay(call: CallbackQuery, db: Database, oxapay: OxaPayClient,
         f"🆔 Invoice: <code>{invoice.invoice_id}</code>\n"
         f"⏱ Expires in: 30 minutes\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"✅ Supports: BTC, ETH, USDT, LTC, and more\n\n"
         f"Click 'Pay Now' to open payment page 👇",
         reply_markup=builder.as_markup()
     )
     await call.answer()
 
-
-# ──────────────────────────────────────────────
-# CHECK PAYMENT
-# ──────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("check_pay:"))
 async def cb_check_payment(call: CallbackQuery, db: Database, bot: Bot,
@@ -154,13 +128,11 @@ async def cb_check_payment(call: CallbackQuery, db: Database, bot: Bot,
     if not order:
         await call.answer("Order not found!", show_alert=True)
         return
-
     if order.status == OrderStatus.DELIVERED:
         await call.answer("✅ Already delivered!", show_alert=True)
         return
 
     await call.answer("🔍 Checking payment...", show_alert=False)
-
     paid = False
 
     if method == "oxapay" and order.payment_id:
@@ -178,63 +150,50 @@ async def cb_check_payment(call: CallbackQuery, db: Database, bot: Bot,
             )
             if tx:
                 paid = True
-                await db.update_order_status(order_id, OrderStatus.PAID, payment_id=tx.get("transaction_id", ""))
+                await db.update_order_status(order_id, OrderStatus.PAID, payment_id=str(tx.get("transaction_id", "")))
 
     if paid:
         await deliver_account(order_id, call.from_user.id, db, bot, config)
     else:
         await call.message.answer(
-            "⏳ Payment not confirmed yet.\n\n"
-            "Please complete the payment and try again in a moment. "
-            "If you already paid, wait 1–2 minutes for confirmation."
+            "⏳ Payment not confirmed yet.\n\nPlease complete the payment and try again in a moment."
         )
 
 
 async def deliver_account(order_id: int, telegram_id: int, db: Database, bot: Bot, config):
-    """Deliver account details to user after confirmed payment."""
     order = await db.get_order(order_id)
     acc = await db.get_account(order.account_id)
 
-    # Mark as paid & delivered
     await db.update_order_status(order_id, OrderStatus.PAID)
     await db.mark_account_sold(acc.id)
     await db.update_order_status(order_id, OrderStatus.DELIVERED)
-
-    # Remove from pending TON
     pending_ton.pop(order_id, None)
 
-    # Build delivery message
     delivery_lines = [
         f"✅ <b>Payment Confirmed!</b>",
         f"🎉 <b>Order #{order_id} — Fragment Account #{acc.id}</b>\n",
         f"━━━━━━━━━━━━━━━━━━━━━━",
         f"📱 Phone Number: <code>{acc.phone_number}</code>",
     ]
-
     if acc.two_fa_password:
         delivery_lines.append(f"🔑 2FA Password: <code>{acc.two_fa_password}</code>")
     if acc.email:
         delivery_lines.append(f"📧 Recovery Email: <code>{acc.email}</code>")
     if acc.session_string:
-        delivery_lines.append(
-            f"\n🔗 <b>Session String</b> (Pyrogram/Telethon):\n"
-            f"<code>{acc.session_string}</code>"
-        )
+        delivery_lines.append(f"\n🔗 <b>Session String:</b>\n<code>{acc.session_string}</code>")
     if acc.tdata_path:
         delivery_lines.append(f"\n📁 <b>TData File:</b> {acc.tdata_path}")
     if acc.extra_info:
         delivery_lines.append(f"\nℹ️ Notes: {acc.extra_info}")
-
     delivery_lines += [
         f"\n━━━━━━━━━━━━━━━━━━━━━━",
         f"⚠️ <b>Save these credentials immediately!</b>",
-        f"📋 Screenshot or copy now — this message won't repeat.",
-        f"\n🆘 Any issues? Contact {config.SUPPORT_USERNAME}",
+        f"📋 Screenshot or copy now.",
+        f"\n🆘 Issues? Contact {config.SUPPORT_USERNAME}",
     ]
 
     await bot.send_message(telegram_id, "\n".join(delivery_lines))
 
-    # Notify admins
     for admin_id in config.ADMIN_IDS:
         try:
             await bot.send_message(
@@ -249,26 +208,19 @@ async def deliver_account(order_id: int, telegram_id: int, db: Database, bot: Bo
             pass
 
 
-# ──────────────────────────────────────────────
-# CANCEL ORDER
-# ──────────────────────────────────────────────
-
 @router.callback_query(F.data.startswith("cancel_order:"))
 async def cb_cancel_order(call: CallbackQuery, db: Database):
     order_id = int(call.data.split(":")[1])
     order = await db.get_order(order_id)
-
     if not order or order.status in (OrderStatus.PAID, OrderStatus.DELIVERED):
         await call.answer("Cannot cancel this order.", show_alert=True)
         return
 
     await db.update_order_status(order_id, OrderStatus.CANCELLED)
 
-    # Release the reserved account back to available
-    from database.db import AccountStatus
     from sqlalchemy import select
+    from db import TelegramAccount, AccountStatus
     async with db.session() as s:
-        from database.db import TelegramAccount
         result = await s.execute(select(TelegramAccount).where(TelegramAccount.id == order.account_id))
         acc = result.scalar_one_or_none()
         if acc and acc.status == AccountStatus.RESERVED:
@@ -277,9 +229,10 @@ async def cb_cancel_order(call: CallbackQuery, db: Database):
 
     pending_ton.pop(order_id, None)
 
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🏠 Main Menu", callback_data="main_menu"))
     await call.message.edit_text(
-        "❌ Order cancelled. The account has been released back to the shop.\n\n"
-        "Feel free to browse again!",
-        reply_markup=back_to_main_kb()
+        "❌ Order cancelled. Account released back to shop.",
+        reply_markup=builder.as_markup()
     )
     await call.answer()
