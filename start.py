@@ -2,8 +2,8 @@ from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery
 
-from database.db import Database
-from utils.keyboards import main_menu_kb
+from db import Database
+from keyboards import main_menu_kb
 
 router = Router()
 
@@ -34,15 +34,14 @@ async def cmd_start(message: Message, db: Database):
 
 
 @router.callback_query(F.data == "main_menu")
-async def cb_main_menu(call: CallbackQuery, db: Database):
+async def cb_main_menu(call: CallbackQuery):
     await call.message.edit_text(WELCOME_TEXT, reply_markup=main_menu_kb())
 
 
 @router.callback_query(F.data == "support")
 async def cb_support(call: CallbackQuery, config):
     await call.message.edit_text(
-        f"🆘 <b>Support</b>\n\nFor any issues, contact us: {config.SUPPORT_USERNAME}\n\nWe typically respond within 1 hour.",
-        reply_markup=None
+        f"🆘 <b>Support</b>\n\nContact us: {config.SUPPORT_USERNAME}\n\nWe typically respond within 1 hour.",
     )
     await call.answer()
 
