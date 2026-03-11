@@ -1,3 +1,4 @@
+import asyncio
 import time
 import logging
 from aiogram import Router, F, Bot
@@ -11,34 +12,29 @@ from otp_relay import start_otp_listener
 
 router = Router()
 logger = logging.getLogger(__name__)
-
 pending_ton: dict[int, dict] = {}
 
 
-# ── TON Payment ───────────────────────────────
+# ── TON ───────────────────────────────────────
 
-@router.callback_query(F.data.startswith("pay_ton:"))
-async def cb_pay_ton(call: CallbackQuery, db: Database, ton_client: TonPaymentClient):
-    account_id = int(call.data.split(":")[1])
-    acc = await db.get_account(account_id)
-    if not acc or acc.status != "available":
-        await call.answer("❌ Account no longer available!", show_alert=True)
+@router.callback_query(F.data == "buy_ton")
+async def cb_buy_ton(call: CallbackQuery, db: Database, ton_client: TonPaymentClient, config):
+    acc = await db.get_available_account()
+    if not acc:
+        await call.answer("❌ Out of stock!", show_alert=True)
         return
 
     user = await db.get_user(call.from_user.id)
-    ton_amount = await ton_client.usd_to_ton(acc.price)
+    ton_amount = await ton_client.usd_to_ton(config.ACCOUNT_PRICE)
     if not ton_amount:
         await call.answer("❌ Could not fetch TON price, try again.", show_alert=True)
         return
 
-    order = await db.create_order(
-        user_id=user.id, account_id=acc.id,
-        payment_method="ton", amount_usd=acc.price,
-    )
-    await db.reserve_account(account_id)
+    order = await db.create_order(user_id=user.id, account_id=acc.id, payment_method="ton", amount_usd=config.ACCOUNT_PRICE)
+    await db.reserve_account(acc.id)
 
     memo = ton_client.generate_payment_memo(order.id)
-    pending_ton[order.id] = {"memo": memo, "ton_amount": ton_amount, "timestamp": int(time.time())}
+    pending_ton[order.id] = {"memo": memo, "ton_amount": ton_amount, "timestamp": int(time.time()), "account_id": acc.id}
 
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="💎 Open TonKeeper", url=ton_client.get_tonkeeper_link(ton_amount, memo)))
@@ -47,64 +43,58 @@ async def cb_pay_ton(call: CallbackQuery, db: Database, ton_client: TonPaymentCl
 
     await call.message.edit_text(
         f"💎 <b>Pay with TON</b>\n\n"
-        f"Order #{order.id}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💵 Price: <b>${acc.price:.2f}</b>\n"
-        f"💎 Amount: <b>{ton_amount} TON</b>\n"
+        f"💵 Amount: <b>{ton_amount} TON</b> (${config.ACCOUNT_PRICE:.2f})\n"
         f"📝 Memo: <code>{memo}</code>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"1. Open TonKeeper\n"
         f"2. Send <b>{ton_amount} TON</b>\n"
-        f"3. <b>Add memo</b> in comment field!\n"
-        f"4. Tap ✅ I've Paid",
+        f"3. Paste memo in comment field\n"
+        f"4. Tap ✅ I've Paid\n\n"
+        f"⚠️ Memo is required!",
         reply_markup=builder.as_markup()
     )
     await call.answer()
 
 
-# ── OxaPay Payment ────────────────────────────
+# ── OxaPay ────────────────────────────────────
 
-@router.callback_query(F.data.startswith("pay_oxapay:"))
-async def cb_pay_oxapay(call: CallbackQuery, db: Database, oxapay: OxaPayClient, config):
-    account_id = int(call.data.split(":")[1])
-    acc = await db.get_account(account_id)
-    if not acc or acc.status != "available":
-        await call.answer("❌ Account no longer available!", show_alert=True)
+@router.callback_query(F.data == "buy_oxapay")
+async def cb_buy_oxapay(call: CallbackQuery, db: Database, oxapay: OxaPayClient, config):
+    acc = await db.get_available_account()
+    if not acc:
+        await call.answer("❌ Out of stock!", show_alert=True)
         return
 
     user = await db.get_user(call.from_user.id)
-    order = await db.create_order(
-        user_id=user.id, account_id=acc.id,
-        payment_method="oxapay", amount_usd=acc.price,
-    )
-    await db.reserve_account(account_id)
+    order = await db.create_order(user_id=user.id, account_id=acc.id, payment_method="oxapay", amount_usd=config.ACCOUNT_PRICE)
+    await db.reserve_account(acc.id)
 
     invoice = await oxapay.create_invoice(
-        amount=acc.price, currency="USDT",
-        order_id=str(order.id),
-        description=f"@ikycbot — Account #{acc.id}",
+        amount=config.ACCOUNT_PRICE, currency="USDT",
+        order_id=str(order.id), description="@ikycbot — Fragment Account",
         callback_url=config.OXAPAY_CALLBACK_URL,
     )
     if not invoice:
+        await db.set_account_available(acc.id)
+        await db.update_order_status(order.id, "cancelled")
         await call.answer("❌ Payment gateway error. Try again.", show_alert=True)
         return
 
     await db.update_order_status(order.id, "pending", payment_id=invoice.invoice_id)
 
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="💳 Pay Now",  url=invoice.pay_link))
-    builder.row(InlineKeyboardButton(text="✅ I've Paid", callback_data=f"check_pay:{order.id}:oxapay"))
-    builder.row(InlineKeyboardButton(text="❌ Cancel",   callback_data=f"cancel_order:{order.id}"))
+    builder.row(InlineKeyboardButton(text="💳 Pay Now",   url=invoice.pay_link))
+    builder.row(InlineKeyboardButton(text="✅ I've Paid",  callback_data=f"check_pay:{order.id}:oxapay"))
+    builder.row(InlineKeyboardButton(text="❌ Cancel",    callback_data=f"cancel_order:{order.id}"))
 
     await call.message.edit_text(
-        f"💳 <b>Pay with Crypto (OxaPay)</b>\n\n"
-        f"Order #{order.id}\n"
+        f"💳 <b>Pay with Crypto</b>\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💵 Amount: <b>${acc.price:.2f} USDT</b>\n"
-        f"🆔 Invoice: <code>{invoice.invoice_id}</code>\n"
+        f"💵 Amount: <b>${config.ACCOUNT_PRICE:.2f} USDT</b>\n"
         f"⏱ Expires: 30 minutes\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"Tap 💳 Pay Now to complete payment",
+        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Tap 💳 Pay Now then come back and tap ✅ I've Paid",
         reply_markup=builder.as_markup()
     )
     await call.answer()
@@ -126,12 +116,12 @@ async def cb_check_payment(call: CallbackQuery, db: Database, bot: Bot,
         await call.answer("✅ Already delivered!", show_alert=True)
         return
 
-    await call.answer("🔍 Checking payment...", show_alert=False)
+    await call.answer("🔍 Checking...", show_alert=False)
     paid = False
 
     if method == "oxapay" and order.payment_id:
-        status_data = await oxapay.check_payment(order.payment_id)
-        if status_data and OxaPayClient.is_paid(status_data):
+        data = await oxapay.check_payment(order.payment_id)
+        if data and OxaPayClient.is_paid(data):
             paid = True
 
     elif method == "ton":
@@ -147,13 +137,15 @@ async def cb_check_payment(call: CallbackQuery, db: Database, bot: Bot,
 
     if paid:
         await deliver_account(order_id, call.from_user.id, db, bot, config)
-    else:
-        await call.message.answer(
-            "⏳ Payment not confirmed yet.\n\nWait a moment and try again."
+        await call.message.edit_text(
+            "✅ <b>Payment confirmed!</b>\n\n"
+            "Your account is being prepared — check your messages! 📲"
         )
+    else:
+        await call.message.answer("⏳ Not confirmed yet. Wait a moment and try again.")
 
 
-# ── Deliver Account ───────────────────────────
+# ── Deliver ───────────────────────────────────
 
 async def deliver_account(order_id: int, telegram_id: int, db: Database, bot: Bot, config):
     order = await db.get_order(order_id)
@@ -164,7 +156,7 @@ async def deliver_account(order_id: int, telegram_id: int, db: Database, bot: Bo
     await db.update_order_status(order_id, "delivered")
     pending_ton.pop(order_id, None)
 
-    # Create OTP relay session
+    # Create OTP relay entry so bot knows to forward OTP to this buyer
     await db.create_otp_request(
         order_id=order_id,
         buyer_tg_id=telegram_id,
@@ -172,66 +164,51 @@ async def deliver_account(order_id: int, telegram_id: int, db: Database, bot: Bo
         phone=acc.phone_number,
     )
 
-    # Start Pyrogram listener to catch the OTP when buyer tries to login
+    # Start Pyrogram listener on this account to catch incoming OTP
     if acc.session_string:
         asyncio.create_task(
             start_otp_listener(acc.phone_number, acc.session_string, bot, db, config)
         )
 
-    # Send account details to buyer
-    msg = (
-        f"✅ <b>Payment Confirmed! Order #{order_id}</b>\n\n"
+    # Send simple confirmation — no account details exposed
+    await bot.send_message(
+        telegram_id,
+        f"✅ <b>Purchase Confirmed!</b>\n\n"
+        f"Your Fragment account is ready.\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📱 Phone Number: <code>{acc.phone_number}</code>\n"
-    )
-    if acc.two_fa_password:
-        msg += f"🔑 2FA Password: <code>{acc.two_fa_password}</code>\n"
-    msg += (
-        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"<b>How to login:</b>\n"
-        f"1. Open Telegram and enter the phone number\n"
-        f"2. Telegram will send an OTP — <b>this bot will forward it to you automatically</b> 📲\n"
-        f"3. Enter the OTP to login\n"
-        f"4. Enter the 2FA password above when prompted\n\n"
-        f"⚠️ <b>Start the login process now</b> — OTP relay is active!\n"
+        f"📲 <b>Now open Telegram</b> (another device or app) and sign in with:\n\n"
+        f"📱 <code>{acc.phone_number}</code>\n\n"
+        f"The login OTP will be <b>sent to you here automatically</b> the moment Telegram sends it.\n"
+        + (f"🔑 2FA Password: <code>{acc.two_fa_password}</code>\n" if acc.two_fa_password else "")
+        + f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚠️ Start the login now while OTP relay is active!\n"
         f"🆘 Issues? {config.SUPPORT_USERNAME}"
     )
-    await bot.send_message(telegram_id, msg)
 
     # Notify admins
     for admin_id in config.ADMIN_IDS:
         try:
             await bot.send_message(
                 admin_id,
-                f"💰 <b>New Sale!</b>\n"
-                f"Order #{order_id} | Account #{acc.id} ({acc.phone_number})\n"
-                f"Buyer: {telegram_id} | ${order.amount_usd:.2f} via {order.payment_method}"
+                f"💰 <b>Sale!</b> Order #{order_id}\n"
+                f"Account #{acc.id} · Buyer: {telegram_id}\n"
+                f"${order.amount_usd:.2f} via {order.payment_method}"
             )
         except Exception:
             pass
 
 
-# ── Cancel Order ──────────────────────────────
+# ── Cancel ────────────────────────────────────
 
 @router.callback_query(F.data.startswith("cancel_order:"))
-async def cb_cancel_order(call: CallbackQuery, db: Database):
+async def cb_cancel(call: CallbackQuery, db: Database):
     order_id = int(call.data.split(":")[1])
     order = await db.get_order(order_id)
     if not order or order.status in ("paid", "delivered"):
-        await call.answer("Cannot cancel this order.", show_alert=True)
+        await call.answer("Cannot cancel.", show_alert=True)
         return
     await db.update_order_status(order_id, "cancelled")
-    from sqlalchemy import select
-    from db import TelegramAccount
-    async with db.session() as s:
-        r = await s.execute(select(TelegramAccount).where(TelegramAccount.id == order.account_id))
-        acc = r.scalar_one_or_none()
-        if acc and acc.status == "reserved":
-            acc.status = "available"
-            await s.commit()
+    await db.set_account_available(order.account_id)
     pending_ton.pop(order_id, None)
     await call.message.edit_text("❌ Order cancelled.")
     await call.answer()
-
-
-import asyncio
