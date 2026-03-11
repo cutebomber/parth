@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ikycbot — Admin Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #080b10;
+    --surface: #0d1117;
+    --surface2: #161b22;
+    --surface3: #1c2333;
+    --border: #21262d;
+    --accent: #00d4ff;
+    --accent2: #7c3aed;
+    --accent3: #10b981;
+    --danger: #ef4444;
+    --warn: #f59e0b;
+    --text: #e6edf3;
+    --muted: #7d8590;
+    --ton: #0098ea;
+    --oxapay: #f59e0b;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Syne', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── GRID NOISE OVERLAY ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.5;
+  }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    position: fixed; left: 0; top: 0; bottom: 0;
+    width: 240px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    z-index: 100;
+    padding: 0;
+  }
+
+  .logo {
+    padding: 28px 24px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .logo-icon {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    margin-bottom: 12px;
+    box-shadow: 0 0 20px rgba(0,212,255,0.3);
+  }
+
+  .logo h1 {
+    font-size: 15px; font-weight: 800;
+    letter-spacing: -0.3px;
+    color: var(--text);
+  }
+
+  .logo p {
+    font-size: 11px; color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    margin-top: 2px;
+  }
+
+  .nav { flex: 1; padding: 16px 12px; overflow-y: auto; }
+
+  .nav-section {
+    font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+    text-transform: uppercase; color: var(--muted);
+    padding: 0 12px; margin: 16px 0 6px;
+  }
+
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: 8px;
+    cursor: pointer; color: var(--muted);
+    font-size: 13.5px; font-weight: 600;
+    transition: all 0.15s;
+    position: relative;
+    margin-bottom: 2px;
+    border: none; background: none; width: 100%; text-align: left;
+  }
+
+  .nav-item:hover { background: var(--surface2); color: var(--text); }
+
+  .nav-item.active {
+    background: linear-gradient(90deg, rgba(0,212,255,0.12), rgba(0,212,255,0.04));
+    color: var(--accent);
+    border-left: 2px solid var(--accent);
+  }
+
+  .nav-item .icon { width: 18px; text-align: center; font-size: 16px; }
+
+  .badge {
+    margin-left: auto;
+    background: var(--danger);
+    color: white; font-size: 10px;
+    padding: 2px 6px; border-radius: 10px;
+    font-family: 'Space Mono', monospace;
+  }
+
+  .sidebar-footer {
+    padding: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    font-family: 'Space Mono', monospace;
+    color: var(--muted);
+  }
+
+  /* ── MAIN ── */
+  .main {
+    margin-left: 240px;
+    min-height: 100vh;
+    position: relative;
+    z-index: 1;
+  }
+
+  .topbar {
+    position: sticky; top: 0;
+    background: rgba(8,11,16,0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 32px;
+    display: flex; align-items: center; justify-content: space-between;
+    z-index: 50;
+  }
+
+  .topbar-title { font-size: 16px; font-weight: 700; }
+  .topbar-sub { font-size: 12px; color: var(--muted); font-family: 'Space Mono', monospace; margin-top: 1px; }
+
+  .topbar-right { display: flex; gap: 10px; align-items: center; }
+
+  .btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px; font-weight: 600;
+    cursor: pointer; border: none;
+    font-family: 'Syne', sans-serif;
+    transition: all 0.15s;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #000;
+    box-shadow: 0 0 16px rgba(0,212,255,0.25);
+  }
+  .btn-primary:hover { background: #00b8d9; box-shadow: 0 0 24px rgba(0,212,255,0.4); }
+
+  .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-ghost:hover { background: var(--surface3); }
+
+  .btn-danger { background: rgba(239,68,68,0.15); color: var(--danger); border: 1px solid rgba(239,68,68,0.3); }
+  .btn-danger:hover { background: rgba(239,68,68,0.25); }
+
+  .btn-success { background: rgba(16,185,129,0.15); color: var(--accent3); border: 1px solid rgba(16,185,129,0.3); }
+
+  .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; }
+
+  .content { padding: 28px 32px; }
+
+  /* ── STAT CARDS ── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px; margin-bottom: 28px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+
+  .stat-card:hover { border-color: rgba(0,212,255,0.3); transform: translateY(-1px); }
+
+  .stat-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--card-accent, var(--accent));
+  }
+
+  .stat-label {
+    font-size: 11px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--muted);
+    font-family: 'Space Mono', monospace;
+  }
+
+  .stat-value {
+    font-size: 28px; font-weight: 800;
+    margin: 8px 0 4px;
+    line-height: 1;
+  }
+
+  .stat-sub { font-size: 12px; color: var(--muted); }
+
+  .stat-icon {
+    position: absolute; top: 16px; right: 16px;
+    font-size: 24px; opacity: 0.2;
+  }
+
+  /* ── TABLES ── */
+  .table-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+
+  .table-head {
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 10px;
+  }
+
+  .table-head h2 { font-size: 14px; font-weight: 700; }
+
+  .table-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+  .search-input {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: 'Syne', sans-serif;
+    outline: none;
+    width: 200px;
+    transition: border-color 0.2s;
+  }
+  .search-input:focus { border-color: var(--accent); }
+
+  select.filter-select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  table { width: 100%; border-collapse: collapse; }
+
+  th {
+    padding: 10px 16px;
+    text-align: left;
+    font-size: 11px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--muted);
+    background: var(--surface2);
+    font-family: 'Space Mono', monospace;
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    padding: 12px 16px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .mono { font-family: 'Space Mono', monospace; font-size: 12px; }
+
+  /* ── BADGES ── */
+  .pill {
+    display: inline-flex; align-items: center;
+    padding: 3px 8px; border-radius: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+    text-transform: uppercase; font-family: 'Space Mono', monospace;
+  }
+  .pill-green  { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
+  .pill-red    { background: rgba(239,68,68,0.15);  color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+  .pill-yellow { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+  .pill-blue   { background: rgba(0,212,255,0.1);   color: #00d4ff; border: 1px solid rgba(0,212,255,0.3); }
+  .pill-purple { background: rgba(124,58,237,0.15); color: #a78bfa; border: 1px solid rgba(124,58,237,0.3); }
+  .pill-gray   { background: rgba(125,133,144,0.15); color: #7d8590; border: 1px solid rgba(125,133,144,0.3); }
+
+  /* ── PAGINATION ── */
+  .pagination {
+    display: flex; align-items: center; justify-content: flex-end;
+    gap: 6px; padding: 14px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .page-btn {
+    padding: 5px 10px; border-radius: 6px;
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); cursor: pointer; font-size: 13px;
+    transition: all 0.15s;
+  }
+  .page-btn:hover { background: var(--surface3); }
+  .page-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+  .page-btn:disabled { opacity: 0.3; cursor: default; }
+
+  /* ── MODAL ── */
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(4px);
+    z-index: 999;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    width: 520px; max-width: 95vw;
+    max-height: 90vh; overflow-y: auto;
+    padding: 28px;
+    animation: modalIn 0.2s ease;
+  }
+
+  @keyframes modalIn {
+    from { opacity: 0; transform: scale(0.95) translateY(10px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+
+  .modal-title {
+    font-size: 18px; font-weight: 800;
+    margin-bottom: 20px;
+    display: flex; align-items: center; gap: 10px;
+  }
+
+  .form-group { margin-bottom: 16px; }
+  .form-label {
+    display: block; font-size: 12px; font-weight: 700;
+    letter-spacing: 0.5px; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 6px;
+    font-family: 'Space Mono', monospace;
+  }
+  .form-input, .form-select, .form-textarea {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: 'Syne', sans-serif;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .form-input:focus, .form-select:focus, .form-textarea:focus {
+    border-color: var(--accent);
+  }
+  .form-textarea { resize: vertical; min-height: 80px; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+
+  /* ── TIER STOCK BARS ── */
+  .tier-bars { display: flex; flex-direction: column; gap: 8px; }
+  .tier-bar-row { display: flex; align-items: center; gap: 12px; }
+  .tier-bar-label { width: 90px; font-size: 12px; color: var(--muted); font-weight: 600; }
+  .tier-bar-track { flex: 1; height: 6px; background: var(--surface3); border-radius: 3px; overflow: hidden; }
+  .tier-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+  .tier-bar-count { width: 30px; text-align: right; font-size: 12px; font-family: 'Space Mono', monospace; color: var(--text); }
+
+  /* ── VIEWS ── */
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ── TOAST ── */
+  .toast-container {
+    position: fixed; bottom: 20px; right: 20px;
+    display: flex; flex-direction: column; gap: 8px;
+    z-index: 9999;
+  }
+  .toast {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 13px;
+    min-width: 220px;
+    animation: toastIn 0.25s ease;
+    display: flex; align-items: center; gap: 8px;
+  }
+  @keyframes toastIn { from { opacity:0; transform: translateX(20px); } to { opacity:1; transform: translateX(0); } }
+  .toast.success { border-color: rgba(16,185,129,0.4); }
+  .toast.error   { border-color: rgba(239,68,68,0.4); }
+
+  /* ── LOADING ── */
+  .loading { display: flex; align-items: center; justify-content: center; padding: 60px; }
+  .spinner {
+    width: 32px; height: 32px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .empty-state {
+    text-align: center; padding: 60px;
+    color: var(--muted); font-size: 14px;
+  }
+  .empty-state .emoji { font-size: 40px; margin-bottom: 12px; }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  .revenue-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+  .rev-card {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; text-align: center;
+  }
+  .rev-card .label { font-size: 11px; color: var(--muted); font-family: 'Space Mono', monospace; text-transform: uppercase; letter-spacing: 1px; }
+  .rev-card .value { font-size: 22px; font-weight: 800; color: var(--accent3); margin-top: 4px; }
+
+  input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
+
+  @media (max-width: 768px) {
+    .sidebar { transform: translateX(-100%); transition: transform 0.3s; }
+    .sidebar.open { transform: translateX(0); }
+    .main { margin-left: 0; }
+    .content { padding: 16px; }
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+    .form-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar" id="sidebar">
+  <div class="logo">
+    <div class="logo-icon">🤖</div>
+    <h1>@ikycbot</h1>
+    <p>Admin Panel v1.0</p>
+  </div>
+  <nav class="nav">
+    <div class="nav-section">Overview</div>
+    <button class="nav-item active" onclick="navigate('dashboard')">
+      <span class="icon">📊</span> Dashboard
+    </button>
+
+    <div class="nav-section">Management</div>
+    <button class="nav-item" onclick="navigate('accounts')">
+      <span class="icon">🔐</span> Accounts
+    </button>
+    <button class="nav-item" onclick="navigate('users')">
+      <span class="icon">👥</span> Users
+    </button>
+    <button class="nav-item" onclick="navigate('orders')">
+      <span class="icon">📦</span> Orders
+      <span class="badge" id="pending-badge" style="display:none">0</span>
+    </button>
+  </nav>
+  <div class="sidebar-footer">
+    🟢 Connected · <span id="clock"></span>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main class="main">
+  <div class="topbar">
+    <div>
+      <div class="topbar-title" id="page-title">Dashboard</div>
+      <div class="topbar-sub" id="page-sub">Overview & statistics</div>
+    </div>
+    <div class="topbar-right">
+      <button class="btn btn-ghost btn-sm" onclick="refreshCurrent()">↻ Refresh</button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ── DASHBOARD ── -->
+    <div class="view active" id="view-dashboard">
+      <div class="stats-grid" id="stats-grid">
+        <div class="loading"><div class="spinner"></div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
+        <!-- Revenue -->
+        <div class="table-card">
+          <div class="table-head"><h2>💰 Revenue</h2></div>
+          <div style="padding:20px;">
+            <div class="revenue-grid" id="rev-grid">
+              <div class="loading"><div class="spinner"></div></div>
+            </div>
+          </div>
+        </div>
+        <!-- Stock by tier -->
+        <div class="table-card">
+          <div class="table-head"><h2>📦 Stock by Tier</h2></div>
+          <div style="padding:20px;">
+            <div class="tier-bars" id="tier-bars">
+              <div class="loading"><div class="spinner"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent orders -->
+      <div class="table-card">
+        <div class="table-head">
+          <h2>🕒 Recent Orders</h2>
+          <button class="btn btn-ghost btn-sm" onclick="navigate('orders')">View all →</button>
+        </div>
+        <div id="recent-orders-body">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── ACCOUNTS ── -->
+    <div class="view" id="view-accounts">
+      <div class="table-card">
+        <div class="table-head">
+          <h2>Fragment Accounts</h2>
+          <div class="table-controls">
+            <select class="filter-select" id="acc-tier-filter" onchange="loadAccounts(0)">
+              <option value="">All Tiers</option>
+              <option value="standard">🔐 Standard</option>
+              <option value="aged_30">📅 Aged 30+</option>
+              <option value="aged_90">🏆 Aged 90+</option>
+              <option value="premium">⭐ Premium</option>
+            </select>
+            <select class="filter-select" id="acc-status-filter" onchange="loadAccounts(0)">
+              <option value="">All Status</option>
+              <option value="available">Available</option>
+              <option value="sold">Sold</option>
+              <option value="reserved">Reserved</option>
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="openAddAccount()">+ Add Account</button>
+          </div>
+        </div>
+        <div id="accounts-body"><div class="loading"><div class="spinner"></div></div></div>
+        <div class="pagination" id="accounts-pagination"></div>
+      </div>
+    </div>
+
+    <!-- ── USERS ── -->
+    <div class="view" id="view-users">
+      <div class="table-card">
+        <div class="table-head">
+          <h2>Users</h2>
+          <div class="table-controls">
+            <input class="search-input" id="user-search" placeholder="Search username…" oninput="debounceUserSearch()">
+          </div>
+        </div>
+        <div id="users-body"><div class="loading"><div class="spinner"></div></div></div>
+        <div class="pagination" id="users-pagination"></div>
+      </div>
+    </div>
+
+    <!-- ── ORDERS ── -->
+    <div class="view" id="view-orders">
+      <div class="table-card">
+        <div class="table-head">
+          <h2>Orders</h2>
+          <div class="table-controls">
+            <select class="filter-select" id="order-status-filter" onchange="loadOrders(0)">
+              <option value="">All Status</option>
+              <option value="pending">Pending</option>
+              <option value="paid">Paid</option>
+              <option value="delivered">Delivered</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+        </div>
+        <div id="orders-body"><div class="loading"><div class="spinner"></div></div></div>
+        <div class="pagination" id="orders-pagination"></div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- ── MODALS ── -->
+
+<!-- Add Account -->
+<div class="modal-overlay" id="modal-add-account">
+  <div class="modal">
+    <div class="modal-title">➕ Add Fragment Account</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Tier *</label>
+        <select class="form-select" id="f-tier">
+          <option value="standard">🔐 Standard</option>
+          <option value="aged_30">📅 Aged 30+</option>
+          <option value="aged_90">🏆 Aged 90+</option>
+          <option value="premium">⭐ Premium</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Price (USD) *</label>
+        <input class="form-input" id="f-price" type="number" step="0.01" placeholder="12.50">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Phone Number *</label>
+        <input class="form-input" id="f-phone" placeholder="+447123456789">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Country Code</label>
+        <input class="form-input" id="f-country" placeholder="+44">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">2FA Password</label>
+        <input class="form-input" id="f-2fa" placeholder="optional">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Recovery Email</label>
+        <input class="form-input" id="f-email" type="email" placeholder="optional">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Account Age (days)</label>
+        <input class="form-input" id="f-age" type="number" placeholder="optional">
+      </div>
+      <div class="form-group">
+        <label class="form-label">TData path</label>
+        <input class="form-input" id="f-tdata" placeholder="account_42.zip">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Session String</label>
+      <textarea class="form-textarea" id="f-session" placeholder="Pyrogram/Telethon session string…" rows="3"></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <input class="form-input" id="f-desc" placeholder="optional notes for buyer">
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+      <input type="checkbox" id="f-has-username">
+      <label for="f-has-username" style="font-size:13px;">Account has @username</label>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-add-account')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddAccount()">Add Account</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Account -->
+<div class="modal-overlay" id="modal-edit-account">
+  <div class="modal">
+    <div class="modal-title">✏️ Edit Account</div>
+    <input type="hidden" id="ea-id">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Price (USD)</label>
+        <input class="form-input" id="ea-price" type="number" step="0.01">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Tier</label>
+        <select class="form-select" id="ea-tier">
+          <option value="standard">🔐 Standard</option>
+          <option value="aged_30">📅 Aged 30+</option>
+          <option value="aged_90">🏆 Aged 90+</option>
+          <option value="premium">⭐ Premium</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Status</label>
+      <select class="form-select" id="ea-status">
+        <option value="available">Available</option>
+        <option value="reserved">Reserved</option>
+        <option value="sold">Sold</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <input class="form-input" id="ea-desc" placeholder="optional">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-edit-account')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitEditAccount()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit User -->
+<div class="modal-overlay" id="modal-edit-user">
+  <div class="modal">
+    <div class="modal-title">👤 Edit User</div>
+    <input type="hidden" id="eu-id">
+    <div class="form-group">
+      <label class="form-label">Balance (USD)</label>
+      <input class="form-input" id="eu-balance" type="number" step="0.01">
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+      <input type="checkbox" id="eu-banned">
+      <label for="eu-banned" style="font-size:13px;">Banned</label>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-edit-user')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitEditUser()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+// ── STATE ──
+let currentView = 'dashboard';
+let accPage = 0, userPage = 0, orderPage = 0;
+let userSearchTimeout;
+let statsCache = null;
+
+// ── CLOCK ──
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toUTCString().slice(17, 25) + ' UTC';
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ── NAVIGATE ──
+function navigate(view) {
+  currentView = view;
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('view-' + view).classList.add('active');
+  document.querySelector(`[onclick="navigate('${view}')"]`).classList.add('active');
+
+  const titles = {
+    dashboard: ['Dashboard', 'Overview & statistics'],
+    accounts:  ['Fragment Accounts', 'Manage your inventory'],
+    users:     ['Users', 'Manage bot users'],
+    orders:    ['Orders', 'View & manage orders'],
+  };
+  document.getElementById('page-title').textContent = titles[view][0];
+  document.getElementById('page-sub').textContent = titles[view][1];
+
+  if (view === 'dashboard') loadDashboard();
+  if (view === 'accounts')  loadAccounts(0);
+  if (view === 'users')     loadUsers(0);
+  if (view === 'orders')    loadOrders(0);
+}
+
+function refreshCurrent() { navigate(currentView); }
+
+// ── API ──
+async function api(path, method = 'GET', body = null) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch('/api' + path, opts);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// ── TOAST ──
+function toast(msg, type = 'success') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.innerHTML = `${type === 'success' ? '✅' : '❌'} ${msg}`;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// ── MODALS ──
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+
+document.querySelectorAll('.modal-overlay').forEach(m => {
+  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); });
+});
+
+// ── FORMAT HELPERS ──
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })
+       + ' ' + d.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
+}
+
+function statusPill(status) {
+  const map = {
+    available: 'pill-green', sold: 'pill-gray', reserved: 'pill-yellow',
+    pending: 'pill-yellow', paid: 'pill-blue', delivered: 'pill-green',
+    cancelled: 'pill-red', refunded: 'pill-purple',
+  };
+  return `<span class="pill ${map[status] || 'pill-gray'}">${status}</span>`;
+}
+
+function tierPill(tier) {
+  const icons = { standard:'🔐', aged_30:'📅', aged_90:'🏆', premium:'⭐' };
+  const labels = { standard:'Standard', aged_30:'Aged 30+', aged_90:'Aged 90+', premium:'Premium' };
+  return `<span class="pill pill-blue">${icons[tier] || ''} ${labels[tier] || tier}</span>`;
+}
+
+function methodPill(m) {
+  const cls = m === 'ton' ? 'pill-blue' : 'pill-yellow';
+  const icon = m === 'ton' ? '💎' : '💳';
+  return `<span class="pill ${cls}">${icon} ${m.toUpperCase()}</span>`;
+}
+
+// ── PAGINATION ──
+function renderPagination(containerId, current, total, perPage, loadFn) {
+  const pages = Math.ceil(total / perPage);
+  const el = document.getElementById(containerId);
+  if (pages <= 1) { el.innerHTML = ''; return; }
+  let html = `<span style="color:var(--muted);font-size:12px;margin-right:8px;">${total} total</span>`;
+  html += `<button class="page-btn" onclick="${loadFn}(${current - 1})" ${current === 0 ? 'disabled' : ''}>←</button>`;
+  const start = Math.max(0, current - 2);
+  const end   = Math.min(pages - 1, current + 2);
+  for (let i = start; i <= end; i++) {
+    html += `<button class="page-btn ${i === current ? 'active' : ''}" onclick="${loadFn}(${i})">${i + 1}</button>`;
+  }
+  html += `<button class="page-btn" onclick="${loadFn}(${current + 1})" ${current >= pages - 1 ? 'disabled' : ''}>→</button>`;
+  el.innerHTML = html;
+}
+
+// ─────────────────────────────────────────────
+// DASHBOARD
+// ─────────────────────────────────────────────
+async function loadDashboard() {
+  try {
+    const s = await api('/stats');
+    statsCache = s;
+
+    // Update pending badge
+    if (s.pending_orders > 0) {
+      document.getElementById('pending-badge').textContent = s.pending_orders;
+      document.getElementById('pending-badge').style.display = '';
+    }
+
+    // Stat cards
+    document.getElementById('stats-grid').innerHTML = `
+      <div class="stat-card" style="--card-accent:#00d4ff">
+        <div class="stat-label">Total Users</div>
+        <div class="stat-value">${s.total_users.toLocaleString()}</div>
+        <div class="stat-sub">+${s.new_users_7d} this week</div>
+        <div class="stat-icon">👥</div>
+      </div>
+      <div class="stat-card" style="--card-accent:#10b981">
+        <div class="stat-label">Available Accounts</div>
+        <div class="stat-value">${s.available}</div>
+        <div class="stat-sub">${s.sold} sold</div>
+        <div class="stat-icon">🔐</div>
+      </div>
+      <div class="stat-card" style="--card-accent:#f59e0b">
+        <div class="stat-label">Total Revenue</div>
+        <div class="stat-value">$${s.revenue_total.toFixed(2)}</div>
+        <div class="stat-sub">${s.total_orders} orders</div>
+        <div class="stat-icon">💰</div>
+      </div>
+      <div class="stat-card" style="--card-accent:#ef4444">
+        <div class="stat-label">Pending Orders</div>
+        <div class="stat-value">${s.pending_orders}</div>
+        <div class="stat-sub">Awaiting payment</div>
+        <div class="stat-icon">⏳</div>
+      </div>
+    `;
+
+    // Revenue breakdown
+    document.getElementById('rev-grid').innerHTML = `
+      <div class="rev-card">
+        <div class="label">Today</div>
+        <div class="value">$${(s.revenue_7d / 7).toFixed(2)}</div>
+      </div>
+      <div class="rev-card">
+        <div class="label">7 Days</div>
+        <div class="value">$${s.revenue_7d.toFixed(2)}</div>
+      </div>
+      <div class="rev-card">
+        <div class="label">30 Days</div>
+        <div class="value">$${s.revenue_30d.toFixed(2)}</div>
+      </div>
+    `;
+
+    // Tier stock bars
+    const ts = s.tier_stock;
+    const maxVal = Math.max(...Object.values(ts), 1);
+    const colors = { standard:'#00d4ff', aged_30:'#a78bfa', aged_90:'#fbbf24', premium:'#34d399' };
+    const labels = { standard:'Standard', aged_30:'Aged 30+', aged_90:'Aged 90+', premium:'Premium' };
+    document.getElementById('tier-bars').innerHTML = Object.entries(ts).map(([k, v]) => `
+      <div class="tier-bar-row">
+        <div class="tier-bar-label">${labels[k]}</div>
+        <div class="tier-bar-track">
+          <div class="tier-bar-fill" style="width:${(v/maxVal*100).toFixed(1)}%;background:${colors[k]}"></div>
+        </div>
+        <div class="tier-bar-count">${v}</div>
+      </div>
+    `).join('');
+
+    // Recent orders
+    const ord = await api('/orders?limit=8');
+    if (!ord.orders.length) {
+      document.getElementById('recent-orders-body').innerHTML = '<div class="empty-state"><div class="emoji">📦</div>No orders yet</div>';
+      return;
+    }
+    document.getElementById('recent-orders-body').innerHTML = `
+      <table>
+        <thead><tr>
+          <th>Order ID</th><th>User ID</th><th>Amount</th><th>Method</th><th>Status</th><th>Date</th>
+        </tr></thead>
+        <tbody>${ord.orders.map(o => `
+          <tr>
+            <td class="mono">#${o.id}</td>
+            <td class="mono">${o.user_id}</td>
+            <td><strong>$${o.amount_usd.toFixed(2)}</strong></td>
+            <td>${methodPill(o.payment_method)}</td>
+            <td>${statusPill(o.status)}</td>
+            <td class="mono" style="color:var(--muted);font-size:11px">${fmtDate(o.created_at)}</td>
+          </tr>
+        `).join('')}</tbody>
+      </table>
+    `;
+  } catch (e) {
+    document.getElementById('stats-grid').innerHTML = `<div style="color:var(--danger);padding:20px">Failed to load stats: ${e.message}</div>`;
+  }
+}
+
+// ─────────────────────────────────────────────
+// ACCOUNTS
+// ─────────────────────────────────────────────
+async function loadAccounts(page = 0) {
+  accPage = page;
+  const tier   = document.getElementById('acc-tier-filter').value;
+  const status = document.getElementById('acc-status-filter').value;
+  document.getElementById('accounts-body').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  try {
+    const data = await api(`/accounts?page=${page}&limit=15&tier=${tier}&status=${status}`);
+    if (!data.accounts.length) {
+      document.getElementById('accounts-body').innerHTML = '<div class="empty-state"><div class="emoji">🔐</div>No accounts found</div>';
+      document.getElementById('accounts-pagination').innerHTML = '';
+      return;
+    }
+    document.getElementById('accounts-body').innerHTML = `
+      <table>
+        <thead><tr>
+          <th>ID</th><th>Phone</th><th>Tier</th><th>Price</th><th>Status</th>
+          <th>Features</th><th>Added</th><th>Actions</th>
+        </tr></thead>
+        <tbody>${data.accounts.map(a => `
+          <tr>
+            <td class="mono" style="color:var(--muted)">#${a.id}</td>
+            <td class="mono">${a.phone_number}</td>
+            <td>${tierPill(a.tier)}</td>
+            <td><strong>$${a.price.toFixed(2)}</strong></td>
+            <td>${statusPill(a.status)}</td>
+            <td>
+              ${a.has_2fa ? '<span class="pill pill-purple">2FA</span> ' : ''}
+              ${a.has_username ? '<span class="pill pill-blue">@user</span> ' : ''}
+              ${a.account_age_days ? `<span class="pill pill-gray">${a.account_age_days}d</span>` : ''}
+              ${a.country_code ? `<span class="pill pill-gray">${a.country_code}</span>` : ''}
+            </td>
+            <td class="mono" style="color:var(--muted);font-size:11px">${fmtDate(a.added_at)}</td>
+            <td>
+              <button class="btn btn-ghost btn-sm" onclick="openEditAccount(${JSON.stringify(a).replace(/"/g,'&quot;')})">Edit</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteAccount(${a.id})">Del</button>
+            </td>
+          </tr>
+        `).join('')}</tbody>
+      </table>
+    `;
+    renderPagination('accounts-pagination', page, data.total, 15, 'loadAccounts');
+  } catch(e) {
+    document.getElementById('accounts-body').innerHTML = `<div style="color:var(--danger);padding:20px">Error: ${e.message}</div>`;
+  }
+}
+
+function openAddAccount() { openModal('modal-add-account'); }
+
+async function submitAddAccount() {
+  const body = {
+    tier:            document.getElementById('f-tier').value,
+    phone_number:    document.getElementById('f-phone').value.trim(),
+    price:           parseFloat(document.getElementById('f-price').value),
+    country_code:    document.getElementById('f-country').value.trim() || null,
+    two_fa_password: document.getElementById('f-2fa').value.trim() || null,
+    email:           document.getElementById('f-email').value.trim() || null,
+    account_age_days:document.getElementById('f-age').value ? parseInt(document.getElementById('f-age').value) : null,
+    tdata_path:      document.getElementById('f-tdata').value.trim() || null,
+    session_string:  document.getElementById('f-session').value.trim() || null,
+    description:     document.getElementById('f-desc').value.trim() || null,
+    has_username:    document.getElementById('f-has-username').checked,
+  };
+  if (!body.phone_number || !body.price) { toast('Phone and price are required', 'error'); return; }
+  try {
+    await api('/accounts', 'POST', body);
+    toast('Account added successfully!');
+    closeModal('modal-add-account');
+    loadAccounts(accPage);
+    ['f-phone','f-price','f-country','f-2fa','f-email','f-age','f-tdata','f-session','f-desc'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('f-has-username').checked = false;
+  } catch(e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+function openEditAccount(a) {
+  document.getElementById('ea-id').value     = a.id;
+  document.getElementById('ea-price').value  = a.price;
+  document.getElementById('ea-tier').value   = a.tier;
+  document.getElementById('ea-status').value = a.status;
+  document.getElementById('ea-desc').value   = a.description || '';
+  openModal('modal-edit-account');
+}
+
+async function submitEditAccount() {
+  const id = document.getElementById('ea-id').value;
+  const body = {
+    price:       parseFloat(document.getElementById('ea-price').value),
+    tier:        document.getElementById('ea-tier').value,
+    status:      document.getElementById('ea-status').value,
+    description: document.getElementById('ea-desc').value.trim() || null,
+  };
+  try {
+    await api('/accounts/' + id, 'PATCH', body);
+    toast('Account updated!');
+    closeModal('modal-edit-account');
+    loadAccounts(accPage);
+  } catch(e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+async function deleteAccount(id) {
+  if (!confirm(`Delete account #${id}? This cannot be undone.`)) return;
+  try {
+    await api('/accounts/' + id, 'DELETE');
+    toast('Account deleted');
+    loadAccounts(accPage);
+  } catch(e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+// ─────────────────────────────────────────────
+// USERS
+// ─────────────────────────────────────────────
+function debounceUserSearch() {
+  clearTimeout(userSearchTimeout);
+  userSearchTimeout = setTimeout(() => loadUsers(0), 400);
+}
+
+async function loadUsers(page = 0) {
+  userPage = page;
+  const search = document.getElementById('user-search').value.trim();
+  document.getElementById('users-body').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  try {
+    const data = await api(`/users?page=${page}&limit=15&search=${encodeURIComponent(search)}`);
+    if (!data.users.length) {
+      document.getElementById('users-body').innerHTML = '<div class="empty-state"><div class="emoji">👥</div>No users found</div>';
+      document.getElementById('users-pagination').innerHTML = '';
+      return;
+    }
+    document.getElementById('users-body').innerHTML = `
+      <table>
+        <thead><tr>
+          <th>ID</th><th>Telegram</th><th>Name</th><th>Balance</th><th>Spent</th><th>Status</th><th>Joined</th><th>Actions</th>
+        </tr></thead>
+        <tbody>${data.users.map(u => `
+          <tr>
+            <td class="mono" style="color:var(--muted)">#${u.id}</td>
+            <td class="mono">${u.username ? '@' + u.username : u.telegram_id}</td>
+            <td>${u.full_name || '—'}</td>
+            <td class="mono" style="color:var(--accent3)">$${(u.balance||0).toFixed(2)}</td>
+            <td class="mono">$${(u.total_spent||0).toFixed(2)}</td>
+            <td>${u.is_banned
+              ? '<span class="pill pill-red">Banned</span>'
+              : '<span class="pill pill-green">Active</span>'}</td>
+            <td class="mono" style="color:var(--muted);font-size:11px">${fmtDate(u.created_at)}</td>
+            <td>
+              <button class="btn btn-ghost btn-sm" onclick="openEditUser(${JSON.stringify(u).replace(/"/g,'&quot;')})">Edit</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id})">Del</button>
+            </td>
+          </tr>
+        `).join('')}</tbody>
+      </table>
+    `;
+    renderPagination('users-pagination', page, data.total, 15, 'loadUsers');
+  } catch(e) {
+    document.getElementById('users-body').innerHTML = `<div style="color:var(--danger);padding:20px">Error: ${e.message}</div>`;
+  }
+}
+
+function openEditUser(u) {
+  document.getElementById('eu-id').value      = u.id;
+  document.getElementById('eu-balance').value = u.balance || 0;
+  document.getElementById('eu-banned').checked = u.is_banned || false;
+  openModal('modal-edit-user');
+}
+
+async function submitEditUser() {
+  const id = document.getElementById('eu-id').value;
+  const body = {
+    balance:   parseFloat(document.getElementById('eu-balance').value),
+    is_banned: document.getElementById('eu-banned').checked,
+  };
+  try {
+    await api('/users/' + id, 'PATCH', body);
+    toast('User updated!');
+    closeModal('modal-edit-user');
+    loadUsers(userPage);
+  } catch(e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+async function deleteUser(id) {
+  if (!confirm(`Delete user #${id}? This cannot be undone.`)) return;
+  try {
+    await api('/users/' + id, 'DELETE');
+    toast('User deleted');
+    loadUsers(userPage);
+  } catch(e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+// ─────────────────────────────────────────────
+// ORDERS
+// ─────────────────────────────────────────────
+async function loadOrders(page = 0) {
+  orderPage = page;
+  const status = document.getElementById('order-status-filter').value;
+  document.getElementById('orders-body').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  try {
+    const data = await api(`/orders?page=${page}&limit=15&status=${status}`);
+    if (!data.orders.length) {
+      document.getElementById('orders-body').innerHTML = '<div class="empty-state"><div class="emoji">📦</div>No orders found</div>';
+      document.getElementById('orders-pagination').innerHTML = '';
+      return;
+    }
+    document.getElementById('orders-body').innerHTML = `
+      <table>
+        <thead><tr>
+          <th>Order ID</th><th>User</th><th>Account</th><th>Amount</th>
+          <th>Method</th><th>Status</th><th>Created</th><th>Actions</th>
+        </tr></thead>
+        <tbody>${data.orders.map(o => `
+          <tr>
+            <td class="mono">#${o.id}</td>
+            <td class="mono">${o.user_id}</td>
+            <td class="mono">#${o.account_id}</td>
+            <td><strong>$${o.amount_usd.toFixed(2)}</strong></td>
+            <td>${methodPill(o.payment_method)}</td>
+            <td>${statusPill(o.status)}</td>
+            <td class="mono" style="color:var(--muted);font-size:11px">${fmtDate(o.created_at)}</td>
+            <td>
+              <select class="filter-select" style="font-size:11px;padding:4px 6px;"
+                onchange="updateOrderStatus(${o.id}, this.value)">
+                <option value="pending"   ${o.status==='pending'   ?'selected':''}>Pending</option>
+                <option value="paid"      ${o.status==='paid'      ?'selected':''}>Paid</option>
+                <option value="delivered" ${o.status==='delivered' ?'selected':''}>Delivered</option>
+                <option value="cancelled" ${o.status==='cancelled' ?'selected':''}>Cancelled</option>
+                <option value="refunded"  ${o.status==='refunded'  ?'selected':''}>Refunded</option>
+              </select>
+            </td>
+          </tr>
+        `).join('')}</tbody>
+      </table>
+    `;
+    renderPagination('orders-pagination', page, data.total, 15, 'loadOrders');
+  } catch(e) {
+    document.getElementById('orders-body').innerHTML = `<div style="color:var(--danger);padding:20px">Error: ${e.message}</div>`;
+  }
+}
+
+async function updateOrderStatus(id, status) {
+  try {
+    await api('/orders/' + id, 'PATCH', { status });
+    toast(`Order #${id} → ${status}`);
+    loadOrders(orderPage);
+  } catch(e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+// ── INIT ──
+loadDashboard();
+</script>
+</body>
+</html>
