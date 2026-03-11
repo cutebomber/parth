@@ -217,3 +217,22 @@ class Database:
             r = await s.execute(select(OtpRequest).where(OtpRequest.id == otp_id))
             req = r.scalar_one_or_none()
             if req: req.status = "done"; await s.commit()
+
+    async def add_balance(self, telegram_id, amount):
+        from sqlalchemy import select
+        async with self.session() as s:
+            r = await s.execute(select(User).where(User.telegram_id == telegram_id))
+            user = r.scalar_one_or_none()
+            if user:
+                user.balance = round(user.balance + amount, 2)
+                await s.commit()
+
+    async def deduct_balance(self, telegram_id, amount):
+        from sqlalchemy import select
+        async with self.session() as s:
+            r = await s.execute(select(User).where(User.telegram_id == telegram_id))
+            user = r.scalar_one_or_none()
+            if user:
+                user.balance     = round(user.balance - amount, 2)
+                user.total_spent = round(user.total_spent + amount, 2)
+                await s.commit()
