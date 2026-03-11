@@ -9,10 +9,10 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
 from config import Config
-from database.db import Database
-from handlers import start, shop, payment, admin
-from payments.oxapay import OxaPayClient
-from payments.ton import TonPaymentClient
+from db import Database
+import start, shop, payment, admin
+from oxapay import OxaPayClient
+from ton import TonPaymentClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,13 +44,11 @@ async def main():
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
 
-    # Pass shared dependencies to handlers via middleware data
     dp["db"] = db
     dp["config"] = config
     dp["oxapay"] = oxapay
     dp["ton_client"] = ton_client
 
-    # Register routers
     dp.include_router(start.router)
     dp.include_router(shop.router)
     dp.include_router(payment.router)
