@@ -12,6 +12,9 @@ class Config:
     TELEGRAM_API_ID: int   = 24331931
     TELEGRAM_API_HASH: str = "d324e1ba33d7d486bc62938aff95c088"
 
+     # ─── Account Price ────────────────────────
+    ACCOUNT_PRICE: float = 4.00  # USD — price for every account
+
     # ─── Database ─────────────────────────────
     DATABASE_URL: str = "sqlite+aiosqlite:///ikycbot.db"
 
