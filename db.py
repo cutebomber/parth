@@ -1,34 +1,12 @@
 from datetime import datetime
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Enum
-import enum
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey
 
 
 class Base(DeclarativeBase):
     pass
 
-
-class AccountStatus(str, enum.Enum):
-    AVAILABLE = "available"
-    SOLD      = "sold"
-    RESERVED  = "reserved"
-
-
-class OrderStatus(str, enum.Enum):
-    PENDING   = "pending"
-    PAID      = "paid"
-    DELIVERED = "delivered"
-    CANCELLED = "cancelled"
-    REFUNDED  = "refunded"
-
-
-class PaymentMethod(str, enum.Enum):
-    TON    = "ton"
-    OXAPAY = "oxapay"
-
-
-# ── Models ────────────────────────────────────
 
 class User(Base):
     __tablename__ = "users"
@@ -45,12 +23,11 @@ class User(Base):
 class TelegramAccount(Base):
     __tablename__ = "telegram_accounts"
     id             = Column(Integer, primary_key=True)
-    phone_number   = Column(String(20), nullable=False)
-    session_string = Column(Text, nullable=True)      # Pyrogram session — used to receive OTP
+    phone_number   = Column(String(20), nullable=False, unique=True)
+    session_string = Column(Text, nullable=True)
     two_fa_password= Column(String(128), nullable=True)
-    price          = Column(Float, nullable=False)
-    status         = Column(String(16), default="available")
-    description    = Column(Text, nullable=True)
+    price          = Column(Float, nullable=False, default=0.0)
+    status         = Column(String(16), default="available")  # available / reserved / sold
     added_at       = Column(DateTime, default=datetime.utcnow)
     sold_at        = Column(DateTime, nullable=True)
 
@@ -63,25 +40,22 @@ class Order(Base):
     payment_method = Column(String(16))
     payment_id     = Column(String(256), nullable=True)
     amount_usd     = Column(Float, nullable=False)
-    status         = Column(String(16), default="pending")
+    status         = Column(String(16), default="pending")  # pending/paid/delivered/cancelled
     created_at     = Column(DateTime, default=datetime.utcnow)
     paid_at        = Column(DateTime, nullable=True)
     delivered_at   = Column(DateTime, nullable=True)
 
 
 class OtpRequest(Base):
-    """Tracks active OTP relay sessions — buyer waiting for OTP"""
     __tablename__ = "otp_requests"
     id          = Column(Integer, primary_key=True)
     order_id    = Column(Integer, ForeignKey("orders.id"), nullable=False)
-    buyer_tg_id = Column(Integer, nullable=False)   # buyer's telegram ID
+    buyer_tg_id = Column(Integer, nullable=False)
     account_id  = Column(Integer, ForeignKey("telegram_accounts.id"), nullable=False)
     phone       = Column(String(20), nullable=False)
-    status      = Column(String(16), default="waiting")  # waiting / sent / done
+    status      = Column(String(16), default="waiting")  # waiting / done
     created_at  = Column(DateTime, default=datetime.utcnow)
 
-
-# ── Database class ────────────────────────────
 
 class Database:
     def __init__(self, url: str):
@@ -95,7 +69,7 @@ class Database:
     async def close(self):
         await self.engine.dispose()
 
-    def session(self) -> AsyncSession:
+    def session(self):
         return self.SessionLocal()
 
     # ── Users ──
@@ -106,9 +80,7 @@ class Database:
             user = r.scalar_one_or_none()
             if not user:
                 user = User(telegram_id=telegram_id, username=username, full_name=full_name)
-                s.add(user)
-                await s.commit()
-                await s.refresh(user)
+                s.add(user); await s.commit(); await s.refresh(user)
             return user
 
     async def get_user(self, telegram_id):
@@ -124,15 +96,23 @@ class Database:
             return r.scalar_one_or_none()
 
     # ── Accounts ──
-    async def get_available_accounts(self):
+    async def get_available_account(self):
+        """Get one available account (FIFO)"""
         from sqlalchemy import select
         async with self.session() as s:
             r = await s.execute(
                 select(TelegramAccount)
                 .where(TelegramAccount.status == "available")
-                .order_by(TelegramAccount.price.asc())
+                .order_by(TelegramAccount.added_at.asc())
+                .limit(1)
             )
-            return r.scalars().all()
+            return r.scalar_one_or_none()
+
+    async def count_available(self):
+        from sqlalchemy import select, func
+        async with self.session() as s:
+            r = await s.execute(select(func.count()).select_from(TelegramAccount).where(TelegramAccount.status == "available"))
+            return r.scalar()
 
     async def get_account(self, account_id):
         from sqlalchemy import select
@@ -140,12 +120,21 @@ class Database:
             r = await s.execute(select(TelegramAccount).where(TelegramAccount.id == account_id))
             return r.scalar_one_or_none()
 
-    async def add_account(self, **kwargs):
+    async def get_account_by_phone(self, phone):
+        from sqlalchemy import select
         async with self.session() as s:
-            acc = TelegramAccount(**kwargs)
-            s.add(acc)
-            await s.commit()
-            await s.refresh(acc)
+            r = await s.execute(select(TelegramAccount).where(TelegramAccount.phone_number == phone))
+            return r.scalar_one_or_none()
+
+    async def add_account(self, phone_number, session_string, two_fa_password=None, price=0.0):
+        async with self.session() as s:
+            acc = TelegramAccount(
+                phone_number=phone_number,
+                session_string=session_string,
+                two_fa_password=two_fa_password,
+                price=price,
+            )
+            s.add(acc); await s.commit(); await s.refresh(acc)
             return acc
 
     async def reserve_account(self, account_id):
@@ -153,19 +142,21 @@ class Database:
         async with self.session() as s:
             r = await s.execute(select(TelegramAccount).where(TelegramAccount.id == account_id))
             acc = r.scalar_one_or_none()
-            if acc:
-                acc.status = "reserved"
-                await s.commit()
+            if acc: acc.status = "reserved"; await s.commit()
 
     async def mark_account_sold(self, account_id):
         from sqlalchemy import select
         async with self.session() as s:
             r = await s.execute(select(TelegramAccount).where(TelegramAccount.id == account_id))
             acc = r.scalar_one_or_none()
-            if acc:
-                acc.status = "sold"
-                acc.sold_at = datetime.utcnow()
-                await s.commit()
+            if acc: acc.status = "sold"; acc.sold_at = datetime.utcnow(); await s.commit()
+
+    async def set_account_available(self, account_id):
+        from sqlalchemy import select
+        async with self.session() as s:
+            r = await s.execute(select(TelegramAccount).where(TelegramAccount.id == account_id))
+            acc = r.scalar_one_or_none()
+            if acc: acc.status = "available"; await s.commit()
 
     async def update_account(self, account_id, **kwargs):
         from sqlalchemy import select
@@ -173,19 +164,15 @@ class Database:
             r = await s.execute(select(TelegramAccount).where(TelegramAccount.id == account_id))
             acc = r.scalar_one_or_none()
             if acc:
-                for k, v in kwargs.items():
-                    setattr(acc, k, v)
+                for k, v in kwargs.items(): setattr(acc, k, v)
                 await s.commit()
 
     # ── Orders ──
     async def create_order(self, user_id, account_id, payment_method, amount_usd):
         async with self.session() as s:
-            order = Order(user_id=user_id, account_id=account_id,
-                          payment_method=payment_method, amount_usd=amount_usd)
-            s.add(order)
-            await s.commit()
-            await s.refresh(order)
-            return order
+            o = Order(user_id=user_id, account_id=account_id, payment_method=payment_method, amount_usd=amount_usd)
+            s.add(o); await s.commit(); await s.refresh(o)
+            return o
 
     async def get_order(self, order_id):
         from sqlalchemy import select
@@ -197,52 +184,36 @@ class Database:
         from sqlalchemy import select
         async with self.session() as s:
             r = await s.execute(select(Order).where(Order.id == order_id))
-            order = r.scalar_one_or_none()
-            if order:
-                order.status = status
-                if payment_id:
-                    order.payment_id = payment_id
-                if status == "paid":
-                    order.paid_at = datetime.utcnow()
-                if status == "delivered":
-                    order.delivered_at = datetime.utcnow()
+            o = r.scalar_one_or_none()
+            if o:
+                o.status = status
+                if payment_id: o.payment_id = payment_id
+                if status == "paid": o.paid_at = datetime.utcnow()
+                if status == "delivered": o.delivered_at = datetime.utcnow()
                 await s.commit()
 
     async def get_user_orders(self, user_id):
         from sqlalchemy import select
         async with self.session() as s:
-            r = await s.execute(
-                select(Order).where(Order.user_id == user_id)
-                .order_by(Order.created_at.desc())
-            )
+            r = await s.execute(select(Order).where(Order.user_id == user_id).order_by(Order.created_at.desc()))
             return r.scalars().all()
 
-    # ── OTP Requests ──
+    # ── OTP ──
     async def create_otp_request(self, order_id, buyer_tg_id, account_id, phone):
         async with self.session() as s:
-            req = OtpRequest(order_id=order_id, buyer_tg_id=buyer_tg_id,
-                             account_id=account_id, phone=phone)
-            s.add(req)
-            await s.commit()
-            await s.refresh(req)
+            req = OtpRequest(order_id=order_id, buyer_tg_id=buyer_tg_id, account_id=account_id, phone=phone)
+            s.add(req); await s.commit(); await s.refresh(req)
             return req
 
     async def get_active_otp_request(self, phone):
         from sqlalchemy import select
         async with self.session() as s:
-            r = await s.execute(
-                select(OtpRequest)
-                .where(OtpRequest.phone == phone)
-                .where(OtpRequest.status == "waiting")
-                .order_by(OtpRequest.created_at.desc())
-            )
+            r = await s.execute(select(OtpRequest).where(OtpRequest.phone == phone).where(OtpRequest.status == "waiting").order_by(OtpRequest.created_at.desc()))
             return r.scalars().first()
 
-    async def complete_otp_request(self, otp_request_id):
+    async def complete_otp_request(self, otp_id):
         from sqlalchemy import select
         async with self.session() as s:
-            r = await s.execute(select(OtpRequest).where(OtpRequest.id == otp_request_id))
+            r = await s.execute(select(OtpRequest).where(OtpRequest.id == otp_id))
             req = r.scalar_one_or_none()
-            if req:
-                req.status = "done"
-                await s.commit()
+            if req: req.status = "done"; await s.commit()
