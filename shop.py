@@ -4,16 +4,15 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
 
-from database.db import Database, AccountCategory
+from db import Database, AccountCategory
 
 router = Router()
 
-# Tier metadata: key -> (emoji, label, description)
 TIER_META = {
-    "standard":  ("🔐", "Standard",   "Fragment-verified · fresh accounts"),
-    "aged_30":   ("📅", "Aged 30+",   "Fragment-verified · 30+ days old"),
-    "aged_90":   ("🏆", "Aged 90+",   "Fragment-verified · 90+ days old"),
-    "premium":   ("⭐", "Premium",    "Fragment-verified + Telegram Premium"),
+    "standard": ("🔐", "Standard",  "Fragment-verified · fresh accounts"),
+    "aged_30":  ("📅", "Aged 30+",  "Fragment-verified · 30+ days old"),
+    "aged_90":  ("🏆", "Aged 90+",  "Fragment-verified · 90+ days old"),
+    "premium":  ("⭐", "Premium",   "Fragment-verified + Telegram Premium"),
 }
 
 
@@ -47,7 +46,6 @@ def account_list_kb(accounts: list, tier: str, page: int, per_page: int = 5):
             text=f"#{acc.id} · ${acc.price:.2f} · {tag}",
             callback_data=f"acc:{acc.id}"
         ))
-
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"tier:{tier}:{page-1}"))
@@ -55,7 +53,6 @@ def account_list_kb(accounts: list, tier: str, page: int, per_page: int = 5):
         nav.append(InlineKeyboardButton(text="Next ▶️", callback_data=f"tier:{tier}:{page+1}"))
     if nav:
         builder.row(*nav)
-
     builder.row(InlineKeyboardButton(text="🔙 Back to Shop", callback_data="shop"))
     return builder.as_markup()
 
@@ -69,8 +66,6 @@ def account_detail_kb(account_id: int):
     builder.row(InlineKeyboardButton(text="🔙 Back to Shop", callback_data="shop"))
     return builder.as_markup()
 
-
-# ── SHOP ENTRY ──────────────────────────────────
 
 @router.message(Command("shop"))
 async def cmd_shop(message: Message, db: Database):
@@ -114,23 +109,18 @@ async def render_shop(target, db: Database, edit: bool = True):
         await target.answer(text, reply_markup=shop_main_kb(tier_data))
 
 
-# ── TIER LISTING ────────────────────────────────
-
 @router.callback_query(F.data.startswith("tier:"))
 async def cb_tier(call: CallbackQuery, db: Database):
     parts = call.data.split(":")
     tier_key = parts[1]
     page = int(parts[2])
-
     if tier_key not in TIER_META:
         await call.answer("Invalid tier.", show_alert=True)
         return
-
     accounts = await db.get_available_by_tier(tier_key)
     if not accounts:
         await call.answer("No accounts in this tier right now!", show_alert=True)
         return
-
     emoji, label, desc = TIER_META[tier_key]
     text = (
         f"{emoji} <b>{label} Fragment Accounts</b>\n"
@@ -141,19 +131,14 @@ async def cb_tier(call: CallbackQuery, db: Database):
     await call.answer()
 
 
-# ── ACCOUNT DETAIL ──────────────────────────────
-
 @router.callback_query(F.data.startswith("acc:"))
 async def cb_account_detail(call: CallbackQuery, db: Database):
     account_id = int(call.data.split(":")[1])
     acc = await db.get_account(account_id)
-
     if not acc or acc.status != "available":
         await call.answer("❌ Account no longer available!", show_alert=True)
         return
-
     emoji, tier_label, _ = TIER_META.get(acc.tier, ("🔐", acc.tier, ""))
-
     features = ["✅ Verified via Fragment.com"]
     if acc.account_age_days:
         features.append(f"📅 Account age: {acc.account_age_days} days")
@@ -169,7 +154,6 @@ async def cb_account_detail(call: CallbackQuery, db: Database):
         features.append("📁 TData file included")
     if acc.email:
         features.append("📧 Recovery email included")
-
     text = (
         f"{emoji} <b>{tier_label} Fragment Account #{acc.id}</b>\n\n"
         f"💵 Price: <b>${acc.price:.2f}</b>\n\n"
@@ -184,15 +168,12 @@ async def cb_account_detail(call: CallbackQuery, db: Database):
     await call.answer()
 
 
-# ── MY ORDERS ───────────────────────────────────
-
 @router.callback_query(F.data == "my_orders")
 async def cb_my_orders(call: CallbackQuery, db: Database):
     user = await db.get_user(call.from_user.id)
     if not user:
         await call.answer("Please /start the bot first.", show_alert=True)
         return
-
     orders = await db.get_user_orders(user.id)
     if not orders:
         kb = InlineKeyboardBuilder()
@@ -203,7 +184,6 @@ async def cb_my_orders(call: CallbackQuery, db: Database):
         )
         await call.answer()
         return
-
     status_emoji = {
         "pending": "⏳", "paid": "💳", "delivered": "✅",
         "cancelled": "❌", "refunded": "🔄"
@@ -217,7 +197,6 @@ async def cb_my_orders(call: CallbackQuery, db: Database):
             f"{e} <b>Order #{o.id}</b> — ${o.amount_usd:.2f} via {pm.upper()}\n"
             f"   {st.upper()} · {o.created_at.strftime('%d %b %Y %H:%M')}"
         )
-
     kb = InlineKeyboardBuilder()
     kb.row(InlineKeyboardButton(text="🛒 Shop More", callback_data="shop"))
     kb.row(InlineKeyboardButton(text="🏠 Main Menu", callback_data="main_menu"))
