@@ -1,3 +1,6 @@
+import time
+import hashlib
+import asyncio
 from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
@@ -10,7 +13,6 @@ from db import Database
 from keyboards import main_menu_kb
 
 router = Router()
-
 
 WELCOME_TEXT = """
 👋 <b>Welcome to @ikycbot!</b>
@@ -72,6 +74,7 @@ async def msg_profile(message: Message, db: Database):
 
 @router.message(F.text == "➕ Add Balance")
 async def msg_add_balance(message: Message, state: FSMContext):
+    await state.clear()
     await message.answer(
         "➕ <b>Add Balance</b>\n\n"
         "Enter the amount in <b>USDT</b> you want to add:\n"
@@ -103,7 +106,7 @@ async def fsm_topup_amount(message: Message, state: FSMContext):
         )
         await state.set_state(TopupFSM.method)
     except ValueError:
-        await message.answer("❌ Invalid amount. Please enter a number like <code>25</code>")
+        await message.answer("❌ Invalid amount. Enter a number like <code>25</code>")
 
 
 @router.callback_query(F.data == "topup_cancel")
@@ -113,14 +116,23 @@ async def cb_topup_cancel(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-@router.callback_query(F.data.in_({"topup_ton", "topup_oxapay"}), TopupFSM.method)
+@router.callback_query(F.data.in_({"topup_ton", "topup_oxapay"}))
 async def cb_topup_pay(call: CallbackQuery, state: FSMContext, db: Database, config):
     data = await state.get_data()
-    amount = data.get("amount", 0)
-    method = call.data  # topup_ton or topup_oxapay
+    amount = data.get("amount")
+    if not amount:
+        await call.answer("Session expired. Please start again.", show_alert=True)
+        await state.clear()
+        return
     await state.clear()
 
-    if method == "topup_ton":
+    user = await db.get_user(call.from_user.id)
+    if not user:
+        await call.answer("Please /start first.", show_alert=True)
+        return
+
+    # ── TON top-up ──
+    if call.data == "topup_ton":
         from ton import TonPaymentClient
         ton_client = TonPaymentClient(config.TON_WALLET_ADDRESS, config.TON_API_KEY)
         ton_amount = await ton_client.usd_to_ton(amount)
@@ -128,9 +140,22 @@ async def cb_topup_pay(call: CallbackQuery, state: FSMContext, db: Database, con
             await call.answer("❌ Could not fetch TON price.", show_alert=True)
             return
 
-        import time, hashlib
-        memo = hashlib.md5(f"TOPUP-{call.from_user.id}-{int(time.time())}".encode()).hexdigest()[:12].upper()
+        memo = "TB" + hashlib.md5(f"{call.from_user.id}-{time.time()}".encode()).hexdigest()[:10].upper()
         deeplink = ton_client.get_tonkeeper_link(ton_amount, memo)
+
+        # Save pending topup with memo as payment_id
+        await db.create_topup(
+            user_id=user.id,
+            telegram_id=call.from_user.id,
+            amount_usd=amount,
+            payment_method="ton",
+            payment_id=memo,
+        )
+
+        # Start background task to watch for this TON payment
+        asyncio.create_task(
+            watch_ton_topup(memo, ton_amount, amount, call.from_user.id, user.id, db, call.bot.token, config)
+        )
 
         builder = InlineKeyboardBuilder()
         builder.row(InlineKeyboardButton(text="💎 Open TonKeeper", url=deeplink))
@@ -143,24 +168,35 @@ async def cb_topup_pay(call: CallbackQuery, state: FSMContext, db: Database, con
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"1. Open TonKeeper\n"
             f"2. Send <b>{ton_amount} TON</b>\n"
-            f"3. Paste memo in comment\n\n"
-            f"⚠️ Balance credited automatically after confirmation.\n"
-            f"Contact {config.SUPPORT_USERNAME} if not credited within 10 min.",
+            f"3. Paste memo in comment field\n\n"
+            f"✅ Balance will be credited automatically!",
             reply_markup=builder.as_markup()
         )
 
-    else:  # oxapay
+    # ── OxaPay top-up ──
+    else:
         from oxapay import OxaPayClient
         oxapay = OxaPayClient(config.OXAPAY_API_KEY, config.OXAPAY_MERCHANT)
+        track_order_id = f"topup_{user.id}_{int(time.time())}"
         invoice = await oxapay.create_invoice(
-            amount=amount, currency="USDT",
-            order_id=f"topup_{call.from_user.id}_{int(__import__('time').time())}",
-            description=f"@ikycbot balance top-up",
+            amount=amount,
+            currency="USDT",
+            order_id=track_order_id,
+            description="@ikycbot balance top-up",
             callback_url=config.OXAPAY_CALLBACK_URL,
         )
         if not invoice:
             await call.answer("❌ Payment gateway error. Try again.", show_alert=True)
             return
+
+        # Save pending topup with OxaPay trackId as payment_id
+        await db.create_topup(
+            user_id=user.id,
+            telegram_id=call.from_user.id,
+            amount_usd=amount,
+            payment_method="oxapay",
+            payment_id=invoice.invoice_id,
+        )
 
         builder = InlineKeyboardBuilder()
         builder.row(InlineKeyboardButton(text="💳 Pay Now", url=invoice.pay_link))
@@ -172,11 +208,51 @@ async def cb_topup_pay(call: CallbackQuery, state: FSMContext, db: Database, con
             f"⏱ Expires: 30 minutes\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"Tap Pay Now to complete.\n"
-            f"Balance credited automatically after confirmation.",
+            f"✅ Balance credited automatically after confirmation!",
             reply_markup=builder.as_markup()
         )
 
     await call.answer()
+
+
+async def watch_ton_topup(memo: str, ton_amount: float, usd_amount: float,
+                           telegram_id: int, user_id: int, db: Database, bot_token: str, config):
+    """Poll TonCenter every 30s for up to 30 minutes to detect TON top-up payment."""
+    from ton import TonPaymentClient
+    from aiogram import Bot
+    from aiogram.client.default import DefaultBotProperties
+    ton_client = TonPaymentClient(config.TON_WALLET_ADDRESS, config.TON_API_KEY)
+    start_ts = int(time.time())
+    deadline = start_ts + 1800  # 30 minutes
+
+    while time.time() < deadline:
+        await asyncio.sleep(30)
+        try:
+            tx = await ton_client.verify_payment(
+                memo=memo,
+                expected_ton=ton_amount,
+                since_timestamp=start_ts - 60,
+            )
+            if tx:
+                topup = await db.get_pending_topup_by_memo(memo)
+                if topup:
+                    credited = await db.credit_topup(topup.id)
+                    if credited:
+                        user = await db.get_user_by_id(user_id)
+                        bot = Bot(token=bot_token, default=DefaultBotProperties(parse_mode="HTML"))
+                        try:
+                            await bot.send_message(
+                                telegram_id,
+                                f"✅ <b>Balance Topped Up!</b>\n\n"
+                                f"💰 Added: <b>${usd_amount:.2f}</b>\n"
+                                f"💳 New balance: <b>${user.balance:.2f}</b>"
+                            )
+                        finally:
+                            await bot.session.close()
+                return
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"TON topup watch error: {e}")
 
 
 # ── Help ─────────────────────────────────────
@@ -189,10 +265,20 @@ async def msg_help(message: Message, config):
         f"1. Tap 🛒 <b>Buy Account</b>\n"
         f"2. Pay with TON or crypto\n"
         f"3. Get phone number instantly\n"
-        f"4. Login — OTP forwarded to you automatically 📲\n\n"
+        f"4. Login — OTP forwarded automatically 📲\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"<b>Add Balance:</b>\n"
-        f"Top up your balance and use it for purchases.\n\n"
+        f"Enter any USDT amount, pay, balance auto-credited.\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🆘 Support: {config.SUPPORT_USERNAME}"
     )
+
+
+@router.message(F.text == "/checkbalance")
+async def cmd_check_balance(message: Message, db: Database):
+    """Manual balance check with fresh DB read."""
+    user = await db.get_user(message.from_user.id)
+    if not user:
+        await message.answer("Please /start first.")
+        return
+    await message.answer(f"💰 Your current balance: <b>${user.balance:.2f}</b>")
