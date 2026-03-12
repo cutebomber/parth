@@ -211,34 +211,58 @@ async def watch_ton_topup(memo: str, ton_amount: float, usd_amount: float,
     ton_client = TonPaymentClient(config.TON_WALLET_ADDRESS, config.TON_API_KEY)
     start_ts = int(time.time())
     deadline = start_ts + 1800  # 30 min
+    attempts = 0
+
+    logger.info(f"[TOPUP] Watching memo={memo} amount={ton_amount} TON user={telegram_id}")
 
     while time.time() < deadline:
         await asyncio.sleep(30)
+        attempts += 1
         try:
+            logger.info(f"[TOPUP] Check #{attempts} for memo={memo}")
+            txs_raw = await ton_client.get_transactions(limit=50)
+            logger.info(f"[TOPUP] Got {len(txs_raw)} transactions from wallet")
+
             tx = await ton_client.verify_payment(
                 memo=memo,
                 expected_ton=ton_amount,
                 since_timestamp=start_ts - 60,
             )
             if tx:
+                logger.info(f"[TOPUP] ✅ Payment found for memo={memo}")
                 topup = await db.get_pending_topup_by_memo(memo)
-                if topup:
-                    credited = await db.credit_topup(topup.id)
-                    if credited:
-                        user = await db.get_user_by_id(user_id)
-                        bot = Bot(token=bot_token, default=DefaultBotProperties(parse_mode="HTML"))
-                        try:
-                            await bot.send_message(
-                                telegram_id,
-                                f"✅ <b>Balance Topped Up!</b>\n\n"
-                                f"💰 Added: <b>${usd_amount:.2f}</b>\n"
-                                f"💳 New balance: <b>${user.balance:.2f}</b>"
-                            )
-                        finally:
-                            await bot.session.close()
+                if not topup:
+                    logger.error(f"[TOPUP] No pending topup found for memo={memo}")
+                    return
+                credited = await db.credit_topup(topup.id)
+                if credited:
+                    user = await db.get_user_by_id(user_id)
+                    logger.info(f"[TOPUP] Credited ${usd_amount} to user {telegram_id}, new balance=${user.balance}")
+                    bot = Bot(token=bot_token, default=DefaultBotProperties(parse_mode="HTML"))
+                    try:
+                        await bot.send_message(
+                            telegram_id,
+                            f"✅ <b>Balance Topped Up!</b>\n\n"
+                            f"💰 Added: <b>${usd_amount:.2f}</b>\n"
+                            f"💳 New balance: <b>${user.balance:.2f}</b>"
+                        )
+                    finally:
+                        await bot.session.close()
+                else:
+                    logger.error(f"[TOPUP] credit_topup returned None for topup_id={topup.id}")
                 return
+            else:
+                # Log recent tx memos to debug mismatch
+                for tx in txs_raw[:5]:
+                    msg = tx.get("in_msg", {})
+                    comment = msg.get("message", "")
+                    val = int(msg.get("value", 0)) / 1e9
+                    utime = tx.get("utime", 0)
+                    logger.info(f"[TOPUP] Recent tx: memo='{comment}' val={val} TON time={utime}")
         except Exception as e:
-            logger.error(f"TON topup watch error: {e}")
+            logger.error(f"[TOPUP] Watch error: {e}", exc_info=True)
+
+    logger.warning(f"[TOPUP] Watcher expired for memo={memo} after {attempts} attempts")
 
 
 # ── Help ─────────────────────────────────────
