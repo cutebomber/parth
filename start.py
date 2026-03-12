@@ -120,11 +120,10 @@ async def cb_topup_cancel(call: CallbackQuery, state: FSMContext):
 async def cb_topup_pay(call: CallbackQuery, state: FSMContext, db: Database, config):
     data = await state.get_data()
     amount = data.get("amount")
-    if not amount:
-        await call.answer("Session expired. Please start again.", show_alert=True)
-        await state.clear()
-        return
     await state.clear()
+    if not amount:
+        await call.answer("Session expired. Please tap ➕ Add Balance again.", show_alert=True)
+        return
 
     user = await db.get_user(call.from_user.id)
     if not user:
