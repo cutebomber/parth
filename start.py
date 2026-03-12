@@ -4,8 +4,7 @@ import asyncio
 import logging
 from aiogram import Router, F
 from aiogram.filters import CommandStart
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
+
 from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
@@ -32,13 +31,11 @@ WELCOME_TEXT = """
 """
 
 
-class TopupFSM(StatesGroup):
-    waiting_amount = State()
+# amount stored in callback_data directly
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, db: Database, state: FSMContext):
-    await state.clear()
+async def cmd_start(message: Message, db: Database):
     await db.get_or_create_user(
         telegram_id=message.from_user.id,
         username=message.from_user.username,
@@ -74,26 +71,22 @@ async def msg_profile(message: Message, db: Database):
 # ── Add Balance ───────────────────────────────
 
 @router.message(F.text == "➕ Add Balance")
-async def msg_add_balance(message: Message, state: FSMContext):
-    await state.clear()
+async def msg_add_balance(message: Message):
     await message.answer(
         "➕ <b>Add Balance</b>\n\n"
         "Enter the amount in <b>USDT</b> you want to add:\n"
-        "Example: <code>25</code> or <code>10.50</code>"
+        "Example: <code>25</code> or <code>10.50</code>\n\n"
+        "Just type the number and send it 👇"
     )
-    await state.set_state(TopupFSM.waiting_amount)
 
 
-@router.message(TopupFSM.waiting_amount)
-async def fsm_topup_amount(message: Message, state: FSMContext):
-    await state.clear()
+@router.message(F.text.regexp(r'^\$?[0-9]+(\.[0-9]{1,2})?$'))
+async def msg_topup_amount(message: Message):
     try:
         amount = float(message.text.strip().replace("$", "").replace(",", ""))
         if amount < 1:
             await message.answer("❌ Minimum top-up is $1.00")
             return
-
-        # Amount is encoded directly in callback_data — no FSM needed after this
         amount_str = f"{amount:.2f}"
         builder = InlineKeyboardBuilder()
         builder.row(
@@ -101,15 +94,12 @@ async def fsm_topup_amount(message: Message, state: FSMContext):
             InlineKeyboardButton(text="💳 Crypto", callback_data=f"tup_ox:{amount_str}"),
         )
         builder.row(InlineKeyboardButton(text="❌ Cancel", callback_data="tup_cancel"))
-
         await message.answer(
-            f"➕ <b>Top Up ${amount:.2f} USDT</b>\n\n"
-            f"Choose payment method:",
+            f"➕ <b>Top Up ${amount:.2f} USDT</b>\n\nChoose payment method:",
             reply_markup=builder.as_markup()
         )
     except ValueError:
         await message.answer("❌ Invalid amount. Enter a number like <code>25</code>")
-        await state.set_state(TopupFSM.waiting_amount)
 
 
 @router.callback_query(F.data == "tup_cancel")
